@@ -9,7 +9,7 @@ CC=g++
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp
 	$(CC) -o $@ -c $< -I$(INC) $(LIB)
 
-_OBJ=cmfw_wfd.o
+_OBJ=cmfw_wfd.o tmp_control.o
 OBJ=$(patsubst %, $(OBJ_DIR)/%, $(_OBJ))
 
 
