@@ -19,13 +19,19 @@ init_wf()
 	sudo mkdir -p ${IFACE_PATH}
 	
 	sudo touch ${INIT_PATH}/self
+	sudo chmod 666 ${INIT_PATH}/self
 	sudo echo 0 > ${INIT_PATH}/self
 	sudo touch ${WFD_STAT_PATH}/self
+	sudo chmod 666 ${WFD_STAT_PATH}/self
 	sudo touch ${IFACE_PATH}/self
+	sudo chmod 666 ${IFACE_PATH}/self
 	sudo touch ${DHCP_STAT_PATH}/self
+	sudo chmod 666 ${DHCP_STAT_PATH}/self
 	sudo echo 0 > ${WFD_STAT_PATH}/self
 	sudo echo 0 > ${DHCP_STAT_PATH}/self
 	sudo echo 1 > ${INIT_PATH}/self
+
+	sudo chown -R pi:pi /tmp/wifi
 }
 start_wfd()
 {
@@ -38,6 +44,7 @@ start_wfd()
 	sudo ifconfig ${P2P_IFNAME} 192.168.49.1 up
 	sudo wpa_cli wps_pbc
 	sudo udhcpd ${DHCP_CONF_PATH} -f &
+	echo 1 > ${WFD_STAT_PATH}/self
 	sleep 1;
 }
 

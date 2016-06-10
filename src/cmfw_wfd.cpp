@@ -10,203 +10,155 @@
 #include <cmfw_log.h>
 #include <cmfw_base.h>
 #include <cmfw_wfd.h>
-#include <uv.h>
+#include <tmp_control.h>
+static int wfd_sock[DEFINED_NUM_PORTS];
+static int wfd_port_nums[DEFINED_NUM_PORTS];
 
 void wfd_init()
 {
 	__ENTER__;
+	static bool initialized;
+	int i;
+
+	if(initialized)
+		return;
+	initialized = true;
+	for(i=0; i<DEFINED_NUM_PORTS; i++){
+		wfd_sock[i] = -1;
+		wfd_port_nums[i] = 10001+i;
+	}
+
+	char buf[256];
+	tmpc_get("wifi/wifi-direct/init", buf, 256);
+	int value = atoi(buf);
+	if( value == 1 ){
+		cmfw_log("P2p already inited");
+		return;
+	}
+
+
+
+	system( "./bin/p2p_setup.sh init" );
+	
+	cmfw_log("Wifi direct init done");
 	__EXIT__;
 }
 
 void wfd_deinit()
 {
-	__ENTER__;
-	__EXIT__;
 }
 
-
-//// wfd_on
-static void _wfd_on_before_work_cb(uv_work_t *req)
+static bool started;
+void wfd_on()
 {
 	__ENTER__;
 
+	char buf[256];
 
+	tmpc_get("wifi/wifi-direct/wfd_stat", buf, 256);
+	int value = atoi(buf);
+	if(value == 1){
+		cmfw_log("P2p already started!");
+		return;
+	}
+	else{
+	 system("./bin/p2p_setup.sh start");
+		cmfw_log("P2p start!");
+	}
+	started = true;
 	__EXIT__;
 }
-static void _wfd_on_after_work_cb(uv_work_t *req, int status)
-{
-	__ENTER__;
 
-	ActionListener *action_listener = (ActionListener *)req->data;
+int wfd_open(cmfw_port_e port)
+{
+	int res = WFD_ERR_NONE, listen_fd;
+	struct sockaddr_in saddr;
+
+	if(wfd_sock[port] >= 0)
+		wfd_close(port);
+
+	if((listen_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0){
+		res = WFD_SOCKET_FAIL;
+		return res;
+	}
+
+	memset(&saddr, 0, sizeof(saddr));
+	saddr.sin_family = AF_INET;
+	saddr.sin_addr.s_addr = inet_addr("192.168.49.1");
+	saddr.sin_port = htons(wfd_port_nums[port]);
+
+	int reuse = 1;
+	if(setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, (char *)&reuse, sizeof(int)) == -1){
+		res = WFD_SOCKET_FAIL;
+		return res;
+	}
+
+	if(bind(listen_fd, (struct sockaddr *)&saddr,\
+				sizeof(saddr)) < 0){
+		cmfw_log("bind error:%s", strerror(errno));
+		res = WFD_BIND_FAIL;
+		return res;
+	}
+
+	if(listen(listen_fd, 1) < 0){
+		res = WFD_LISTEN_FAIL;
+		return res;
+	}
 	
-	//TODO Depending on the value of res, the cb should be different
-	action_listener->on_success();
+	cmfw_log("Open success");
+	wfd_sock[port] = listen_fd;
+
+	return listen_fd;
+}
+
+void wfd_close(cmfw_port_e port)
+{
+	if(wfd_sock[port] >= 0)
+		close(wfd_sock[port]);
+
+	wfd_sock[port] = -1;
+
+	/*
+	int i;
+	for(i=0; i<DEFINED_NUM_PORTS; i++){
+		if(wfd_sock[i] > 0)
+			break;
+	}
+	*/
 	
-	free(action_listener);
-	free(req);
-
-	__EXIT__;
 }
-void wfd_on( void *main_loop, ActionListener *action_listener )
+int wfd_accept(cmfw_port_e port)
 {
 	__ENTER__;
 
-	uv_work_t *req = (uv_work_t *)malloc(sizeof(uv_work_t));
-	req->data = (void *)action_listener;
-	uv_queue_work((uv_loop_t *)main_loop, req,\
-			_wfd_on_before_work_cb, \
-			_wfd_on_after_work_cb);
-
-	__EXIT__;
-}
-//// ? wfd_on
-
-//// wfd_off
-void wfd_off()
-{
-	__ENTER__;
-	__EXIT__;
-}
-//// ?wfd_off
-
-//// wfd_accept
-static void _wfd_accept_before_work_cb(uv_work_t *req)
-{
-	__ENTER__;
-
-	int res = WFD_ERR_NONE, listen_fd, cli_fd, caddr_len;
-	struct sockaddr_in saddr, caddr;
+	int res = WFD_ERR_NONE, cli_fd, caddr_len;
+	struct sockaddr_in caddr;
 	struct hostent *h;
-	AcceptListener *accept_listener = (AcceptListener *)req->data;
-
-	do{
-		if((listen_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-			res = WFD_SOCKET_FAIL;
-			break;
-		}
-		
 	
-		memset(&saddr, 0, sizeof(saddr));			
-		saddr.sin_family = AF_INET;
-		saddr.sin_addr.s_addr = inet_addr("192.168.49.1");
-		saddr.sin_port = htons(WFD_PORT_NUM);
+	if((res = wfd_open(port)) < 0)
+		return res;
 
-		int reuse = 1;
-		if(setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, (char *)&reuse, sizeof(int)) == -1){
-			//PORT-REUSABLE Socket
-			cmfw_log("Reuse socket setting error");
-		}
-
-		
-		if(bind(listen_fd, (struct sockaddr *)&saddr,\
-					sizeof(saddr)) < 0){
-			cmfw_log("bind_err:%s", strerror(errno));
-			res = WFD_BIND_FAIL;
-			break;
-		}
-
-		if(listen(listen_fd, 1) < 0){
-			res = WFD_LISTEN_FAIL;
-			break;
-		}
-		
-		caddr_len = sizeof(caddr);
-		cmfw_log("Server now accepting...");
-		if((cli_fd = accept(listen_fd, (struct sockaddr *)&caddr,\
-						(socklen_t *)&caddr_len)) < 0){
-			cmfw_log("accept_err:%s", strerror(errno));
-			res = WFD_ACCEPT_FAIL;
-			break;
-		}
-		cmfw_log("Accepted!");
-		
-
-		cmfw_log("Server connected to (%s) \n",\
-				inet_ntoa(*(struct in_addr *)&caddr.sin_addr));
-
-		close(listen_fd);
-		
-	} while(0);
-
-	if(res == WFD_ERR_NONE){
-		accept_listener->res = cli_fd;
+	caddr_len = sizeof(caddr);
+	cmfw_log("WFD Server(PORT:%d) now accepting...", wfd_port_nums[port]);
+	if((cli_fd = accept(wfd_sock[port], (struct sockaddr *)&caddr,\
+					(socklen_t *)&caddr_len)) < 0){
+		cmfw_log("accept_err:%s", strerror(errno));
+		res = WFD_ACCEPT_FAIL;
+		return res;
 	}
-	else{
-		accept_listener->res = res;
-	}
-	
+	cmfw_log("Accepted!");
+
+
+	cmfw_log("Server connected to (%s) \n",\
+			inet_ntoa(*(struct in_addr *)&caddr.sin_addr));
+
+	wfd_close(port);
+
+
+	res = cli_fd;
 	__EXIT__;
+
+	return res;
+
 }
-static void _wfd_accept_after_work_cb(uv_work_t *req, int status)
-{
-	__ENTER__;
-
-	AcceptListener *accept_listener = (AcceptListener *)req->data;
-	
-	//TODO Depending on the value of res, the cb should be different
-	int sock = accept_listener->res;
-	accept_listener->res = 0;
-
-	if(sock < 0){
-		//Failed
-		accept_listener->on_failure(sock);
-	}
-	else{
-		accept_listener->on_success(sock);
-		close(sock);
-	}
-
-	free(accept_listener);
-	free(req);
-
-	__EXIT__;
-}
-void wfd_accept( void *main_loop, AcceptListener *accept_listener)
-{
-	__ENTER__;
-
-	uv_work_t *req = (uv_work_t *)malloc(sizeof(uv_work_t));
-	req->data = (void *)accept_listener;
-	uv_queue_work((uv_loop_t *)main_loop, req,\
-			_wfd_accept_before_work_cb, \
-			_wfd_accept_after_work_cb);
-
-	__EXIT__;
-}
-//// ?wfd_accept
-
-//// wfd_read
-void _wfd_read_before_work_cb(uv_work_t *req)
-{
-	__ENTER__;
-
-	__EXIT__;
-}
-void _wfd_read_after_work_cb(uv_work_t *req, int status)
-{
-	__ENTER__;
-
-	ReadListener *read_listener = (ReadListener *)req->data;
-
-	//TODO Depending on the value of __private, the cb should be different
-	read_listener->on_success_msg(NULL, 0);
-	read_listener->on_success_file(NULL, 0, NULL, 0);
-
-	free(read_listener);
-	free(req);
-
-	__EXIT__;
-}
-void wfd_read( void *main_loop, int sock, ReadListener *read_listener)
-{
-	__ENTER__;
-	
-	uv_work_t *req = (uv_work_t *)malloc(sizeof(uv_work_t));
-	req->data = (void *)read_listener;
-	uv_queue_work((uv_loop_t *)main_loop, req, \
-			_wfd_read_before_work_cb, \
-			_wfd_read_after_work_cb);
-
-	__EXIT__;
-}
-//// ?wfd_read
+//// wfd_accept

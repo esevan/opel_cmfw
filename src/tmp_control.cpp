@@ -142,7 +142,7 @@ int tmpc_get(char *res_name, OUT char *val, size_t count)
 
 	strcat( res_name_buff, "/self" );
 
-	fd_res = open( res_name_buff, O_RDWR );
+	fd_res = open( res_name_buff, O_RDONLY );
 	if( fd_res < 0 ){
 		res = -2; //FAILED TO OPEN
 		__TMP_EXIT__;
