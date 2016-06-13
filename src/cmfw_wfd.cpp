@@ -118,6 +118,8 @@ void wfd_close(cmfw_port_e port)
 
 	wfd_sock[port] = -1;
 
+	//system("./bin/p2p_setup.sh stop");
+
 	/*
 	int i;
 	for(i=0; i<DEFINED_NUM_PORTS; i++){

@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <opel_cmfw.h>
+#include <tmp_control.h>
 
 int main()
 {
@@ -25,8 +26,14 @@ int main()
 				if(strcmp(buf, "file_transfer") == 0){
 					printf("File Transfer request\n");
 					if(cmfw_recv_file( CMFW_DEFAULT_PORT, "./res" ) == CMFW_E_NONE)
-						printf("File receving done\n");
-
+						printf("File receipt done\n");
+					
+					system("./bin/p2p_setup.sh stop");
+				}
+				else if(strcmp(buf, "file_receipt") == 0){
+					printf("File receipt request\n");
+					if(cmfw_send_file( CMFW_DEFAULT_PORT, "./res/20160609_000404.jpg") == CMFW_E_NONE)
+						printf("File transfer done\n");
 				}
 				/*char *test_str = "OPEL Test String";
 				char data[4096];
@@ -37,6 +44,11 @@ int main()
 				int res = cmfw_send_msg( CMFW_DEFAULT_PORT, test_str, strlen(test_str)+1);
 				res = cmfw_send_msg( CMFW_DEFAULT_PORT, data, 4096 );
 				*/
+				else{
+					char buf[256];
+					tmpc_get("wifi/wifi-direct/dev_addr", buf, 256);
+					cmfw_send_msg(CMFW_DEFAULT_PORT, buf, strlen(buf));
+				}
 			}
 			else{
 				cmfw_close( CMFW_DEFAULT_PORT );

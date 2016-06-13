@@ -16,6 +16,7 @@
 #include <cmfw_log.h>
 #include <cmfw_wfd.h>
 #include <cmfw_bt.h>
+#include <tmp_control.h>
 
 using namespace std;
 
@@ -366,22 +367,26 @@ int cmfw_connect(cmfw_port_e port)
 	res = bt_connect( cli_sock, port );
 	return res;
 }
-int cmfw_recv_file(cmfw_port_e port, char *dest_dir)
+
+void __get_time_interval(struct timeval *now, struct timeval *before)
+	//now = now-before
 {
-	/*
-	   if( finfo == NULL )
-		return CMFW_E_INVALID_PARAM;
-		*/
-
-	int cmd = __cmfw_recv_cmd(port);
-
-	if( cmd < 0)
-		return CMFW_E_FAIL;
-
+	now->tv_usec-=before->tv_usec;
+	now->tv_sec -= before->tv_sec;
+	if(now->tv_usec < 0){
+		now->tv_usec += 1000000;
+		now->tv_sec -= 1;
+	}
+}
+int __cmfw_process_cmd(int cmd, cmfw_port_e port)
+{
+	struct timeval check, now;
 	switch( cmd ){
 		case CMFW_CMD_WFD_ON:
 			{
+				gettimeofday(&check, NULL);
 				wfd_on();
+
 				int sock = cmfw_connect(CMFW_CONTROL_PORT);
 
 				if(sock < 0){
@@ -389,17 +394,22 @@ int cmfw_recv_file(cmfw_port_e port, char *dest_dir)
 					return CMFW_E_FAIL;
 				}
 				cli_socks[CMFW_CONTROL_PORT].bt_sock = sock;
-				int err = __cmfw_send_cmd(CMFW_CONTROL_PORT, CMFW_CMD_WFD_ON_ACK);
-				cmfw_log("Sent : %d", err);
-				err = __cmfw_recv_cmd(CMFW_CONTROL_PORT);
-				cmfw_log("Connection : %d:%s", err, strerror(errno));
-				
+				int cmd = __cmfw_send_cmd(CMFW_CONTROL_PORT, CMFW_CMD_WFD_ON_ACK);
+				//res = __cmfw_recv_cmd(CMFW_CONTROL_PORT);
+				cmfw_log("Connection closed");
+
 				close(sock);
 				cli_socks[CMFW_CONTROL_PORT].bt_sock = -1;
 				cmfw_log("Command Sent and closed");
+				gettimeofday(&now, NULL);
+				__get_time_interval(&now, &check);
+				cmfw_log("WFD On: %d.%d", now.tv_sec, now.tv_usec);
 
 				if((sock = wfd_accept(port)) < 0)
 					return CMFW_E_FAIL;
+				gettimeofday(&now, NULL);
+				__get_time_interval(&now, &check);
+				cmfw_log("WFD Connected: %d.%d", now.tv_sec, now.tv_usec);
 
 				cli_socks[port].wfd_sock = sock;
 
@@ -412,12 +422,30 @@ int cmfw_recv_file(cmfw_port_e port, char *dest_dir)
 			break;
 	}
 
+	return CMFW_E_NONE;
+}
+int cmfw_recv_file(cmfw_port_e port, char *dest_dir)
+{
+	/*
+	   if( finfo == NULL )
+		return CMFW_E_INVALID_PARAM;
+		*/
+
+	/* wfd on */
+	int cmd = __cmfw_recv_cmd(port);
+
+	if( cmd < 0)
+		return CMFW_E_FAIL;
+
+	int res = __cmfw_process_cmd(cmd, port);
+	if( res < 0 )
+		return res;
+
+	/* ? wfd on */
+	
+	
+	/* recv file */
 	cmfw_log("Receiving File ...");
-	/*int iter = 5;
-	for(;iter>0; iter--){
-		cmfw_log("Transfer...%d", iter);
-		sleep(1);
-	}*/
 	unsigned char buf[CMFW_PACKET_SIZE];
 	int bytes = 0;
 	int res_read;
@@ -537,6 +565,8 @@ int cmfw_recv_file(cmfw_port_e port, char *dest_dir)
 	close(cli_socks[port].wfd_sock);
 	cli_socks[port].wfd_sock = -1;
 	free(dest_file_path);
+
+	/* ? recv file */
 
 
 	return CMFW_E_NONE;
@@ -660,6 +690,152 @@ int cmfw_send_msg(cmfw_port_e port, char *buf, int len)
 	return CMFW_E_NONE;
 }
 
+/*
+   ./example\0
+     ^ret  ^len-1
+
+   /home/pi/example\0
+		    ^ret  ^len-1
+
+   example\0
+   ^ret  ^len-1
+
+   /home/pi/\0    -
+           ^len-1  |->ret NULL
+   \0             - 
+  ^len-1          
+*/
+static char *__cmfw_token_fname(char *fname)
+{
+	if(fname == NULL)
+		return NULL;
+	int len = strlen(fname);
+	if(len <= 0)
+		return NULL;
+
+	int pos;
+	for(pos = len-1; pos >= 0; pos--){
+		if(fname[pos] == '/')
+			break;
+	}
+	
+	//It's directory or 0 string
+	if(pos == len-1)
+		return NULL;
+
+	//Relative path from pwd
+	if(pos < 0)
+		return fname;
+
+	
+	return &fname[pos+1];
+}
+
+static void _wfd_cli_close(cmfw_port_e port){
+	close(cli_socks[port].wfd_sock);
+	cli_socks[port].wfd_sock = -1;
+	system("./bin/p2p_stop");
+}
 int cmfw_send_file(cmfw_port_e port, char *fname)
 {
+	/* Wifi On */
+
+	int res = CMFW_E_NONE;
+	int cmd = __cmfw_recv_cmd(port);
+	
+	if (cmd < 0)
+		return CMFW_E_FAIL;
+
+	res = __cmfw_process_cmd(cmd, port);
+	if(res < 0)
+		return CMFW_E_FAIL;
+	/* ?Wifi On */
+
+	/* Send file */
+	cmfw_log("Sending File .. ");
+	
+	unsigned char buf[CMFW_PACKET_SIZE];
+	int res_write, res_read, fname_len, flen, bytes = 0;
+	int fd_file;
+	char *brief_path;
+	struct timeval start, end;
+	int wfd_sock = cli_socks[port].wfd_sock;
+
+	if(wfd_sock < 0){
+		return CMFW_E_DISCON;
+	}
+
+
+	brief_path = __cmfw_token_fname(fname);
+	if(brief_path == NULL){
+		_wfd_cli_close(port);
+		return CMFW_E_INVALID_PARAM;
+	}
+
+	gettimeofday(&start, NULL);
+
+	//
+	fd_file = open(fname, O_RDONLY);
+	if( fd_file < 0){
+		_wfd_cli_close(port);
+		return CMFW_E_NO_FILE;
+	}
+
+	fname_len = strlen(brief_path);
+	int n_len = htonl(fname_len);
+	res_write = write(wfd_sock, &n_len, 4);
+	if(res_write < 0){
+		_wfd_cli_close(port);
+		return CMFW_E_DISCON;
+	}
+
+	res_write = write(wfd_sock, brief_path, fname_len);
+	if(res_write < 0){
+		_wfd_cli_close(port);
+		return CMFW_E_DISCON;
+	}
+
+
+	flen = lseek(fd_file, 0, SEEK_END);
+	lseek(fd_file, 0, SEEK_SET);
+
+	int n_flen = htonl(flen);
+	res_write = write(wfd_sock, &n_flen, 4);
+	if(res_write < 0){
+		_wfd_cli_close(port);
+		return CMFW_E_DISCON;
+	}
+	cmfw_log("Src File Path: %s(%s:%d)[%d]", fname, brief_path, fname_len, flen);
+
+	int curr_progress, prev_progress = 0;
+	while( bytes < flen){
+		if((curr_progress = (bytes * 10 / flen)) != prev_progress ){
+			cmfw_log("File sending ...%d", (curr_progress) * 10);
+			prev_progress = curr_progress;
+		}
+		res_read = read(fd_file, buf, CMFW_PACKET_SIZE);
+		if(res_read < 0){
+			res = CMFW_E_NO_FILE;
+			break;
+		}
+
+		res_write = write(wfd_sock, buf, res_read);
+		if(res_write < 0){
+			res = CMFW_E_DISCON;
+			break;
+		}
+
+		bytes += res_read;
+	}
+
+	if(res == CMFW_E_NONE){
+		//wait for full receipt
+		read(wfd_sock, buf, CMFW_PACKET_SIZE);
+	}
+
+	close(fd_file);
+	wfd_close(port);
+	_wfd_cli_close(port);
+
+	return res;
 }
