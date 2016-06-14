@@ -28,7 +28,6 @@ int main()
 					if(cmfw_recv_file( CMFW_DEFAULT_PORT, "./res" ) == CMFW_E_NONE)
 						printf("File receipt done\n");
 					
-					system("./bin/p2p_setup.sh stop");
 				}
 				else if(strcmp(buf, "file_receipt") == 0){
 					printf("File receipt request\n");

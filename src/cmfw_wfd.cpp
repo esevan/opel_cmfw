@@ -26,6 +26,7 @@ void wfd_init()
 	for(i=0; i<DEFINED_NUM_PORTS; i++){
 		wfd_sock[i] = -1;
 		wfd_port_nums[i] = 10001+i;
+		cmfw_log("wfd_port:%d-%d", i, wfd_port_nums[i]);
 	}
 
 	char buf[256];
@@ -62,7 +63,7 @@ void wfd_on()
 		return;
 	}
 	else{
-	 system("./bin/p2p_setup.sh start");
+	 //system("./bin/p2p_setup.sh start");
 		cmfw_log("P2p start!");
 	}
 	started = true;
@@ -100,7 +101,7 @@ int wfd_open(cmfw_port_e port)
 		return res;
 	}
 
-	if(listen(listen_fd, 1) < 0){
+	if(listen(listen_fd, 5) < 0){
 		res = WFD_LISTEN_FAIL;
 		return res;
 	}
