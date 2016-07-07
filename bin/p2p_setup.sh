@@ -7,8 +7,8 @@ DHCP_STAT_PATH=/tmp/wifi/wifi-direct/dhcp_stat
 IFACE_PATH=/tmp/wifi/wifi-direct/iface
 DEV_ADDR_PATH=/tmp/wifi/wifi-direct/dev_addr
 
-P2P_CONF_PATH="/home/pi/workspace/hostap/wpa_supplicant/p2p.conf"
-DHCP_CONF_PATH="/home/pi/workspace/dhcp/dhcpd.conf"
+P2P_CONF_PATH="./bin/p2p.conf"
+DHCP_CONF_PATH="./bin/dhcpd.conf"
 
 
 init_wf()
@@ -37,6 +37,22 @@ init_wf()
 	sudo echo 1 > ${INIT_PATH}/self
 
 	sudo chown -R pi:pi /tmp/wifi
+	
+	sudo ifconfig wlan0 up
+	sudo wpa_supplicant -Dnl80211 -iwlan0 -c${P2P_CONF_PATH} -Bd
+	sudo wpa_cli p2p_group_add persistent=0
+	P2P_IFNAME=`ifconfig | awk '/p2p/ {print $1}'`
+	echo ${P2P_IFNAME} > ${IFACE_PATH}/self
+	sudo ip addr add 192.168.49.1/24 brd 192.168.49.255 dev ${P2P_IFNAME}
+	sudo ifconfig ${P2P_IFNAME} 192.168.49.1 up
+	DEV_ADDR=`cat ${DEV_ADDR_PATH}/self`
+	
+	sudo wpa_cli wps_pin any 12345670
+#sudo wpa_cli p2p_set ssid_postfix ub
+	sudo udhcpd ${DHCP_CONF_PATH} -f &
+	echo 1 > ${INIT_PATH}/self
+
+
 }
 deinit_wfd()
 {
@@ -55,35 +71,12 @@ deinit_wfd()
 
 start_wfd()
 {
-	sudo ifconfig wlan0 up
-	sudo wpa_supplicant -Dnl80211 -iwlan0 -c${P2P_CONF_PATH} -Bd
-	sudo wpa_cli p2p_group_add persistent=0
-	P2P_IFNAME=`ifconfig | awk '/p2p/ {print $1}'`
-	echo ${P2P_IFNAME} > ${IFACE_PATH}/self
-	sudo ip addr add 192.168.49.1/24 brd 192.168.49.255 dev ${P2P_IFNAME}
-	sudo ifconfig ${P2P_IFNAME} 192.168.49.1 up
-	DEV_ADDR=`cat ${DEV_ADDR_PATH}/self`
-	
-	sudo wpa_cli wps_pin any 12345670
-#sudo wpa_cli p2p_set ssid_postfix ub
-	sudo udhcpd ${DHCP_CONF_PATH} -f &
-	echo 1 > ${INIT_PATH}/self
-
-	echo Started
+		echo Started
 }
 
 stop_wfd()
 {
-	P2P_IFNAME=`ifconfig | awk '/p2p/ {print $1}'`
-	sudo wpa_cli p2p_flush
-	sudo wpa_cli p2p_group_remove ${P2P_IFNAME}
-	sudo pkill -x udhcpd
-	sudo echo 0 > ${DHCP_STAT_PATH}/self
-	sudo rm /var/lib/dhcpcd5/dhcpcd-p2p-wlan0-* -f
-
-	sudo pkill -x wpa_supplicant
-	sudo ifconfig wlan0 down
-	sudo echo 0 > ${WFD_STAT_PATH}/self
+	echo stopped
 }
 
 
